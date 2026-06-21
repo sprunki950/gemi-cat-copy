@@ -1,12 +1,25 @@
 -- LocalScript inside StarterGui (or executed)
 local Players = game:GetService("Players")
 local TextChatService = game:GetService("TextChatService")
+local StarterGui = game:GetService("StarterGui")
 local LocalPlayer = Players.LocalPlayer
 
 -- Setup State Variables
 local isCopying = false
 local copyAllActive = false
 local targetsToCopy = {} -- Format: { ["Username"] = true }
+
+-- Helper function to safely print tracking info directly to YOUR chat box
+local function localChatLog(senderName, messageText)
+	pcall(function()
+		StarterGui:SetCore("ChatMakeSystemMessage", {
+			Text = string.format("[Copying %s]: %s", senderName, messageText),
+			Color = Color3.fromRGB(85, 255, 127), -- Clean visible green neon tint
+			Font = Enum.Font.GothamBold,
+			TextSize = 14
+		})
+	end)
+end
 
 -- Helper function to find a player by a partial name match
 local function findPlayerByPartialName(searchString)
@@ -43,7 +56,6 @@ end
 -- COMMAND INTERACTION HANDLERS
 -- ==========================================
 local function handleChatCommands(message)
-	-- Strip trailing spaces to prevent syntax match fails
 	message = string.gsub(message, "%s+$", "")
 
 	-- Command 1: Exact check for "all" configuration
@@ -57,8 +69,6 @@ local function handleChatCommands(message)
 				targetsToCopy[player.Name] = true
 			end
 		end
-		
-		print("[ChatCopy] Now copying EVERYONE in the server.")
 		return true
 	end
 
@@ -70,9 +80,6 @@ local function handleChatCommands(message)
 		if target then
 			targetsToCopy[target.Name] = true
 			isCopying = true
-			print("[ChatCopy] Now copying: " .. target.DisplayName .. " (@" .. target.Name .. ")")
-		else
-			warn("[ChatCopy] Player not found matching: " .. copyArg)
 		end
 		return true
 	end
@@ -82,7 +89,6 @@ local function handleChatCommands(message)
 		isCopying = false
 		copyAllActive = false
 		table.clear(targetsToCopy)
-		print("[ChatCopy] Stopped copying all players.")
 		return true
 	end
 	return false
@@ -98,6 +104,8 @@ local function watchOtherPlayers(player)
 	
 	player.Chatted:Connect(function(message)
 		if isCopying and targetsToCopy[player.Name] then
+			-- Send copy tracking alert directly to your local screen feed
+			localChatLog(player.DisplayName, message)
 			duplicateMessage(message)
 		end
 	end)
