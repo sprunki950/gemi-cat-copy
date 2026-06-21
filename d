@@ -92,4 +92,44 @@ end
 local function watchOtherPlayers(player)
 	if player == LocalPlayer then return end
 	
-	if
+	if copyAllActive then
+		targetsToCopy[player.Name] = true
+	end
+	
+	player.Chatted:Connect(function(message)
+		if isCopying and targetsToCopy[player.Name] then
+			duplicateMessage(message)
+		end
+	end)
+end
+
+for _, p in ipairs(Players:GetPlayers()) do watchOtherPlayers(p) end
+Players.PlayerAdded:Connect(watchOtherPlayers)
+
+-- Universal outgoing local hook to execute commands internally
+if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+	TextChatService.SendingMessage:Connect(function(textChatMessage)
+		handleChatCommands(textChatMessage.Text)
+	end)
+else
+	local chatBar = LocalPlayer:WaitForChild("PlayerGui"):WaitForChild("Chat", 5)
+	if chatBar then
+		LocalPlayer.Chatted:Connect(handleChatCommands)
+	else
+		task.spawn(function()
+			while task.wait(0.5) do
+				local success = pcall(function()
+					LocalPlayer.Chatted:Connect(handleChatCommands)
+				end)
+				if success then break end
+			end
+		end)
+	end
+end
+
+-- Clean up tracking array when players leave the game
+Players.PlayerRemoving:Connect(function(player)
+	if targetsToCopy[player.Name] then
+		targetsToCopy[player.Name] = nil
+	end
+end)
