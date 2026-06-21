@@ -109,11 +109,8 @@ Players.PlayerAdded:Connect(watchOtherPlayers)
 -- Universal outgoing local hook to execute commands internally
 if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
 	TextChatService.SendingMessage:Connect(function(textChatMessage)
-		local handled = handleChatCommands(textChatMessage.Text)
-		if handled then
-			-- Hides the command so it doesn't show up publicly in the server chat box
-			textChatMessage.Status = Enum.TextChatMessageStatus.Success
-		end
+		handleChatCommands(textChatMessage.Text)
+		-- Removed the status change so the message sends to the chat layout normally
 	end)
 else
 	local chatBar = LocalPlayer:WaitForChild("PlayerGui"):WaitForChild("Chat", 5)
