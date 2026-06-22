@@ -34,6 +34,7 @@ local aimbotHeartbeat = nil
 local aimbotButtonFrame = nil
 local inputBeganConnection = nil
 local inputEndedConnection = nil
+local tButton = nil
 
 local activeConnections = {}
 local function trackConnection(conn)
@@ -196,10 +197,93 @@ local function sendPublicChatMessage(message)
 	end
 end
 
+local function getClosestPlayer()
+	local closest, dist = nil, math.huge
+	local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if not myHrp then return nil end
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+			local d = (p.Character.HumanoidRootPart.Position - myHrp.Position).Magnitude
+			if d < dist then dist = d closest = p end
+		end
+	end
+	return closest
+end
+
+local function enableAntiGrabMechanic()
+	if not isFlingThingsAndPeople then return end
+	if antiGrabEnabled then return end
+	antiGrabEnabled = true
+	pcall(function()
+		local CharacterEvents = ReplicatedStorage:WaitForChild("CharacterEvents", 2)
+		local Struggle = CharacterEvents and CharacterEvents:WaitForChild("Struggle", 2)
+		local GameCorrectionEvents = ReplicatedStorage:WaitForChild("GameCorrectionEvents", 2)
+		local StopAllVelocity = GameCorrectionEvents and GameCorrectionEvents:WaitForChild("StopAllVelocity", 2)
+		
+		if Struggle and StopAllVelocity then
+			autoStruggleCoroutine = RunService.Heartbeat:Connect(function()
+				if not antiGrabEnabled then return end
+				local character = LocalPlayer.Character
+				if character and character:FindFirstChild("Head") then
+					local head = character.Head
+					if head:FindFirstChild("PartOwner") then
+						Struggle:FireServer()
+						StopAllVelocity:FireServer()
+						for _, part in pairs(character:GetChildren()) do if part:IsA("BasePart") then part.Anchored = true end end
+						local isHeldVal = LocalPlayer:FindFirstChild("IsHeld")
+						while isHeldVal and isHeldVal.Value and antiGrabEnabled do task.wait() end
+						for _, part in pairs(character:GetChildren()) do if part:IsA("BasePart") then part.Anchored = false end end
+					end
+				end
+			end)
+		end
+	end)
+end
+
+local function disableAntiGrabMechanic()
+	if not antiGrabEnabled then return end
+	antiGrabEnabled = false
+	if autoStruggleCoroutine then autoStruggleCoroutine:Disconnect() end
+	pcall(function()
+		local character = LocalPlayer.Character
+		if character then for _, part in pairs(character:GetChildren()) do if part:IsA("BasePart") then part.Anchored = false end end end
+	end)
+end
+
+-- ==========================================
+-- BACKPACK IMPLEMENTATION UTILITIES
+-- ==========================================
+local function attachBackpack(targetPlayer)
+	local character = targetPlayer.Character
+	if not character then return end
+	
+	local torso = character:FindFirstChild("Torso") or character:FindFirstChild("UpperTorso") or character:FindFirstChild("HumanoidRootPart")
+	if not torso then return end
+	
+	local existing = character:FindFirstChild("ScriptBackpack")
+	if existing then existing:Destroy() end
+	
+	local backpack = Instance.new("Part")
+	backpack.Name = "ScriptBackpack"
+	backpack.Size = Vector3.new(1.5, 2, 0.8)
+	backpack.Color = Color3.fromRGB(math.random(0, 255), math.random(0, 255), math.random(0, 255))
+	backpack.Material = Enum.Material.Fabric
+	backpack.CanCollide = false
+	backpack.Massless = true
+	backpack.Parent = character
+	
+	local weld = Instance.new("Weld")
+	weld.Name = "BackpackWeld"
+	weld.Part0 = torso
+	weld.Part1 = backpack
+	weld.C0 = CFrame.new(0, 0, 0.6)
+	weld.Parent = backpack
+end
+
 -- ==========================================
 -- COMMAND PROCESSING ENGINE
 -- ==========================================
-local validCommands = {"fov", "afk", "back", "fly", "unfly", "noclip", "clip", "enable aimbot", "disable aimbot", "dontrespond", "respond", "teleportclick", "spin", "unspin", "orbit", "unorbit", "headsit", "tpto", "chatcopy", "copychat", "stopcopying", "uncopychat", "enable infjump", "disable infjump", "enable antigrab", "disable antigrab", "cmds", "commands"}
+local validCommands = {"fov", "afk", "back", "fly", "unfly", "noclip", "clip", "enable aimbot", "disable aimbot", "dontrespond", "respond", "teleportclick", "spin", "unspin", "orbit", "unorbit", "headsit", "tpto", "chatcopy", "copychat", "stopcopying", "uncopychat", "enable infjump", "disable infjump", "enable antigrab", "disable antigrab", "backpack", "cmds", "commands"}
 
 local function runCommand(message)
 	message = string.gsub(message, "^%s+", ""):gsub("%s+$", "")
@@ -207,6 +291,31 @@ local function runCommand(message)
 	local args = string.split(message, " ")
 	local baseCmd = string.lower(args[1] or "")
 	local targetArg = args[2] and string.lower(args[2]) or nil
+
+	if baseCmd == "backpack" then
+		if not targetArg or targetArg == "" then
+			attachBackpack(LocalPlayer)
+			notifyIY("Attached backpack to yourself.", false)
+		elseif targetArg == "random" then
+			local pool = {}
+			for _, p in ipairs(Players:GetPlayers()) do if p.Character then table.insert(pool, p) end end
+			if #pool > 0 then
+				local randomPlayer = pool[math.random(1, #pool)]
+				attachBackpack(randomPlayer)
+				notifyIY("Attached backpack to random player: " .. randomPlayer.DisplayName, false)
+				sendPublicChatMessage("Gave a random backpack to " .. randomPlayer.DisplayName)
+			else notifyIY("No players available.", true) end
+		else
+			local matchedStr = string.sub(message, string.len(args[1]) + 2)
+			local t = findPlayerByPartialName(matchedStr)
+			if t then
+				attachBackpack(t)
+				notifyIY("Attached backpack to " .. t.DisplayName, false)
+				sendPublicChatMessage("Gave a backpack to " .. t.DisplayName)
+			else notifyIY("Player matching '" .. matchedStr .. "' not found.", true) end
+		end
+		return true
+	end
 
 	if baseCmd == "chatcopy" or baseCmd == "copychat" then
 		if targetArg == "all" then
@@ -222,12 +331,8 @@ local function runCommand(message)
 				lastTargetName, lastTargetDisplayName = t.Name, t.DisplayName
 				notifyIY("Now copying chat from: " .. t.DisplayName, false)
 				sendPublicChatMessage("Copying " .. t.DisplayName .. "'s chat")
-			else 
-				notifyIY("Player matching '" .. matchedStr .. "' not found.", true) 
-			end
-		else 
-			notifyIY("Usage: chatcopy [player / all]", true) 
-		end
+			else notifyIY("Player matching '" .. matchedStr .. "' not found.", true) end
+		else notifyIY("Usage: chatcopy [player / all]", true) end
 		return true
 	end
 	
@@ -239,27 +344,289 @@ local function runCommand(message)
 		return true
 	end
 
-	-- Quick fallback implementations for other commands
 	if baseCmd == "fov" then
 		local fovValue = tonumber(targetArg)
 		if fovValue and fovValue >= 1 and fovValue <= 120 then Workspace.CurrentCamera.FieldOfView = fovValue sendPublicChatMessage("Changed FOV to " .. tostring(fovValue)) end
 		return true
 	end
-	if baseCmd == "fly" then isFlying = true; notifyIY("Fly enabled", false) return true end
-	if baseCmd == "unfly" then isFlying = false; notifyIY("Fly disabled", false) return true end
-	if baseCmd == "noclip" then noclipEnabled = true; notifyIY("Noclip enabled", false) return true end
-	if baseCmd == "clip" then noclipEnabled = false; notifyIY("Noclip disabled", false) return true end
-	if baseCmd == "cmds" or baseCmd == "commands" then displayLocalSystemMessage("Commands: fov, afk, back, fly, unfly, noclip, clip, chatcopy [user/all], stopcopying", "#FFD700") return true end
+
+	if baseCmd == "afk" then
+		if isManualAfk then return true end
+		if isAutoAfk then isAutoAfk = false if autoAfkLoopThread then task.cancel(autoAfkLoopThread) autoAfkLoopThread = nil end end
+		isManualAfk = true
+		sendPublicChatMessage("Goodbye, see you later!")
+		if isFlingThingsAndPeople then enableAntiGrabMechanic() end
+		if manualAfkLoopThread then task.cancel(manualAfkLoopThread) end
+		manualAfkLoopThread = task.spawn(function()
+			while isManualAfk do task.wait(30) if isManualAfk then sendPublicChatMessage("Im afk, ill be back (automated message from script)") end end
+		end)
+		return true
+	end
+
+	if baseCmd == "back" then
+		if isManualAfk then
+			isManualAfk = false
+			if manualAfkLoopThread then task.cancel(manualAfkLoopThread) manualAfkLoopThread = nil end
+			if isFlingThingsAndPeople then disableAntiGrabMechanic() end
+			sendPublicChatMessage("Welcome back!")
+		end
+		return true
+	end
+
+	if baseCmd == "fly" then
+		if isFlying then return true end
+		isFlying = true; notifyIY("Fly enabled", false)
+		if flyHeartbeat then flyHeartbeat:Disconnect() end
+		flyHeartbeat = RunService.Heartbeat:Connect(function()
+			if not isFlying then return end
+			local character = LocalPlayer.Character
+			local hrp = character and character:FindFirstChild("HumanoidRootPart")
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			if hrp and humanoid then
+				humanoid:ChangeState(Enum.HumanoidStateType.Flying)
+				local lookVector = camera.CFrame.LookVector
+				local rightVector = camera.CFrame.RightVector
+				local flyVelocity = Vector3.new(0, 0, 0)
+				if UserInputService:IsKeyDown(Enum.KeyCode.W) then flyVelocity = flyVelocity + lookVector end
+				if UserInputService:IsKeyDown(Enum.KeyCode.S) then flyVelocity = flyVelocity - lookVector end
+				if UserInputService:IsKeyDown(Enum.KeyCode.D) then flyVelocity = flyVelocity + rightVector end
+				if UserInputService:IsKeyDown(Enum.KeyCode.A) then flyVelocity = flyVelocity - rightVector end
+				if flyVelocity.Magnitude == 0 and humanoid.MoveDirection.Magnitude > 0 then
+					flyVelocity = camera.CFrame:VectorToWorldSpace(Vector3.new(
+						UserInputService:IsKeyDown(Enum.KeyCode.D) and 1 or (UserInputService:IsKeyDown(Enum.KeyCode.A) and -1 or 0),
+						0,
+						UserInputService:IsKeyDown(Enum.KeyCode.S) and 1 or (UserInputService:IsKeyDown(Enum.KeyCode.W) and -1 or 0)
+					))
+				end
+				if flyVelocity.Magnitude > 0 then flyVelocity = flyVelocity.Unit * flySpeed end
+				if UserInputService:IsKeyDown(Enum.KeyCode.Space) then flyVelocity = flyVelocity + Vector3.new(0, flySpeed, 0)
+				elseif UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then flyVelocity = flyVelocity - Vector3.new(0, flySpeed, 0) end
+				hrp.AssemblyLinearVelocity = flyVelocity
+				hrp.CFrame = CFrame.new(hrp.Position, hrp.Position + lookVector)
+			end
+		end)
+		return true
+	end
+
+	if baseCmd == "unfly" then
+		if isFlying then
+			isFlying = false; if flyHeartbeat then flyHeartbeat:Disconnect() end
+			local character = LocalPlayer.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			if humanoid then humanoid:ChangeState(Enum.HumanoidStateType.GettingUp) end
+			notifyIY("Fly disabled", false)
+		end
+		return true
+	end
+
+	if baseCmd == "noclip" then
+		if noclipEnabled then return true end
+		noclipEnabled = true; notifyIY("Noclip enabled", false)
+		if noclipConnection then noclipConnection:Disconnect() end
+		noclipConnection = RunService.Stepped:Connect(function()
+			if not noclipEnabled then return end
+			local character = LocalPlayer.Character
+			if character then for _, part in pairs(character:GetChildren()) do if part:IsA("BasePart") then part.CanCollide = false end end end
+		end)
+		return true
+	end
+
+	if baseCmd == "clip" then if noclipEnabled then noclipEnabled = false; if noclipConnection then noclipConnection:Disconnect() noclipConnection = nil end notifyIY("Noclip disabled", false) end return true end
+
+	if string.sub(lowerMessage, 1, 14) == "enable aimbot" then
+		disableAimbotEngine()
+		local targetPlayer = getClosestPlayer()
+		if not targetPlayer then notifyIY("No target players nearby.", true) return true end
+		aimbotEnabled = true; aimbotTargetPlayer = targetPlayer
+		if IsPC then
+			sendPublicChatMessage("Aimbot tracker active: " .. targetPlayer.DisplayName .. " [Hold Right Click]")
+			inputBeganConnection = UserInputService.InputBegan:Connect(function(input, processed)
+				if processed or UserInputService:GetFocusedTextBox() then return end
+				if input.UserInputType == Enum.UserInputType.MouseButton2 then aimbotLockActive = true end
+			end)
+			inputEndedConnection = UserInputService.InputEnded:Connect(function(input, processed)
+				if input.UserInputType == Enum.UserInputType.MouseButton2 then aimbotLockActive = false end
+			end)
+		else
+			sendPublicChatMessage("Aimbot tracking active: " .. targetPlayer.DisplayName)
+			aimbotButtonFrame = Instance.new("Frame")
+			aimbotButtonFrame.Name = "AimbotToggleContainer"; aimbotButtonFrame.Size = UDim2.new(0, 70, 0, 35)
+			local mobileGui = PlayerGui:FindFirstChild("TouchGui")
+			local touchFrame = mobileGui and mobileGui:FindFirstChild("TouchControlFrame")
+			local jumpButton = touchFrame and touchFrame:FindFirstChild("JumpButton")
+			if jumpButton then
+				aimbotButtonFrame.Position = UDim2.new(jumpButton.Position.X.Scale, jumpButton.Position.X.Offset + (jumpButton.Size.X.Offset / 2) - 35, jumpButton.Position.Y.Scale, jumpButton.Position.Y.Offset - 110)
+				aimbotButtonFrame.Parent = touchFrame
+			else aimbotButtonFrame.Position = UDim2.new(1, -160, 1, -240) aimbotButtonFrame.Parent = ScreenGui end
+			local bCorner = Instance.new("UICorner"); bCorner.CornerRadius = UDim.new(0, 6); bCorner.Parent = aimbotButtonFrame
+			tButton = Instance.new("TextButton")
+			tButton.Name = "LockToggle"; tButton.Size = UDim2.new(1, 0, 1, 0); tButton.BackgroundTransparency = 0.3; tButton.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+			tButton.Text = "LOCK"; tButton.TextColor3 = Color3.fromRGB(255, 255, 255); tButton.Font = Enum.Font.SourceSansBold; tButton.TextSize = 14; tButton.Parent = aimbotButtonFrame
+			tButton.MouseButton1Click:Connect(function()
+				aimbotLockActive = not aimbotLockActive
+				if tButton then
+					tButton.BackgroundColor3 = aimbotLockActive and Color3.fromRGB(40, 180, 40) or Color3.fromRGB(180, 40, 40)
+					tButton.Text = aimbotLockActive and "UNLOCK" or "LOCK"
+				end
+			end)
+		end
+		aimbotHeartbeat = RunService.RenderStepped:Connect(function()
+			if not aimbotEnabled then return end
+			local activeNearest = getClosestPlayer()
+			if activeNearest then aimbotTargetPlayer = activeNearest end
+			if aimbotLockActive then
+				local grabGui = PlayerGui:FindFirstChild("GrabGui") or PlayerGui:FindFirstChild("MobileGrabGui") or PlayerGui:FindFirstChild("MainGui")
+				if grabGui then
+					for _, element in ipairs(grabGui:GetDescendants()) do
+						if (element:IsA("ImageLabel") or element:IsA("Frame") or element:IsA("TextButton")) and element.Visible and element.BackgroundColor3 == Color3.fromRGB(0, 162, 255) then
+							aimbotLockActive = false
+							if tButton then tButton.BackgroundColor3 = Color3.fromRGB(180, 40, 40) tButton.Text = "LOCK" end
+							notifyIY("Aimbot unlocked: Action state blocked.", false)
+							break
+						end
+					end
+				end
+			end
+			if not aimbotLockActive or not aimbotTargetPlayer then return end
+			local character = aimbotTargetPlayer.Character
+			local targetPart = character and (character:FindFirstChild("Torso") or character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("UpperTorso"))
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			if targetPart and humanoid and humanoid.Health > 0 then camera.CFrame = CFrame.new(camera.CFrame.Position, targetPart.Position)
+			else aimbotLockActive = false if tButton then tButton.BackgroundColor3 = Color3.fromRGB(180, 40, 40) tButton.Text = "LOCK" end end
+		end)
+		return true
+	end
+	
+	if lowerMessage == "disable aimbot" then if aimbotEnabled then disableAimbotEngine() sendPublicChatMessage("Disabled aimbot engine") end return true end
+	if baseCmd == "dontrespond" then silenceResponses = true notifyIY("Command log muted.", false) return true end
+	if baseCmd == "respond" then silenceResponses = false notifyIY("Command log unmuted.", false) return true end
+
+	if baseCmd == "teleportclick" then
+		if clickTeleportActive then return true end
+		clickTeleportActive = true; sendPublicChatMessage("Enabled teleport click")
+		if clickConnection then clickConnection:Disconnect() end
+		if stopButtonFrame then stopButtonFrame:Destroy() end
+		stopButtonFrame = Instance.new("Frame")
+		stopButtonFrame.Size = UDim2.new(0, 140, 0, 35); stopButtonFrame.Position = UDim2.new(0.5, -70, 0.05, 0); stopButtonFrame.BackgroundColor3 = Color3.fromRGB(180, 40, 40); stopButtonFrame.BorderSizePixel = 0; stopButtonFrame.Parent = ScreenGui
+		local btnCorner = Instance.new("UICorner"); btnCorner.CornerRadius = UDim.new(0, 6); btnCorner.Parent = stopButtonFrame
+		local stopButton = Instance.new("TextButton")
+		stopButton.Size = UDim2.new(1, 0, 1, 0); stopButton.BackgroundTransparency = 1; stopButton.Text = "Stop Teleport"; stopButton.TextColor3 = Color3.fromRGB(255, 255, 255); stopButton.Font = Enum.Font.SourceSansBold; stopButton.TextSize = 14; stopButton.Parent = stopButtonFrame
+		stopButton.MouseButton1Click:Connect(function()
+			clickTeleportActive = false; if clickConnection then clickConnection:Disconnect() end; if stopButtonFrame then stopButtonFrame:Destroy() end; sendPublicChatMessage("Disabled teleport click")
+		end)
+		local mouse = LocalPlayer:GetMouse()
+		clickConnection = mouse.Button1Down:Connect(function()
+			if not clickTeleportActive or UserInputService:GetFocusedTextBox() then return end
+			if mouse.Target and (mouse.Target:IsA("ClickDetector") or mouse.Target:FindFirstChildOfClass("ClickDetector")) then return end
+			local startPos = UserInputService:GetMouseLocation()
+			task.wait(0.08)
+			if (startPos - UserInputService:GetMouseLocation()).Magnitude > 4 then return end
+			local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			if hrp and mouse.Target then hrp.CFrame = CFrame.new(mouse.Hit.Position + Vector3.new(0, 3, 0)) end
+		end)
+		return true
+	end
+
+	if baseCmd == "spin" then
+		if isSpinning then return true end
+		isSpinning = true; notifyIY("Spin active.", false)
+		local currentAngle = 0
+		spinHeartbeat = RunService.Heartbeat:Connect(function(deltaTime)
+			local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			if hrp and isSpinning then currentAngle = currentAngle + (360 * deltaTime) hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, math.rad(currentAngle), 0) end
+		end)
+		return true
+	end
+
+	if baseCmd == "unspin" then if isSpinning then isSpinning = false; if spinHeartbeat then spinHeartbeat:Disconnect() end notifyIY("Spin disabled.", false) end return true end
+
+	if baseCmd == "orbit" then
+		if not targetArg then notifyIY("Usage: orbit [player]", true) return true end
+		local targetPlayer = findPlayerByPartialName(string.sub(message, string.len(args[1]) + 2))
+		if not targetPlayer then notifyIY("Player not found.", true) return true end
+		if orbitHeartbeat then orbitHeartbeat:Disconnect() end
+		isOrbiting, orbitAngle = true, 0
+		notifyIY("Orbiting " .. targetPlayer.DisplayName, false)
+		orbitHeartbeat = RunService.Heartbeat:Connect(function(deltaTime)
+			local localHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			local targetHRP = targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+			if isOrbiting and localHRP and targetHRP then
+				orbitAngle = orbitAngle + (120 * deltaTime)
+				local offset = Vector3.new(math.cos(math.rad(orbitAngle)) * 6, 1, math.sin(math.rad(orbitAngle)) * 6)
+				localHRP.CFrame = CFrame.new(targetHRP.Position + offset, targetHRP.Position)
+				localHRP.AssemblyLinearVelocity = Vector3.new(0,0,0)
+			else isOrbiting = false; if orbitHeartbeat then orbitHeartbeat:Disconnect() end notifyIY("Orbit stopped.", false) end
+		end)
+		return true
+	end
+
+	if baseCmd == "unorbit" then if isOrbiting then isOrbiting = false; if orbitHeartbeat then orbitHeartbeat:Disconnect() end notifyIY("Orbit disabled.", false) end return true end
+
+	if baseCmd == "headsit" then
+		if not targetArg then notifyIY("Usage: headsit [player]", true) return true end
+		local targetPlayer = findPlayerByPartialName(string.sub(message, string.len(args[1]) + 2))
+		if not targetPlayer then notifyIY("Player not found.", true) return true end
+		if sitHeartbeat then sitHeartbeat:Disconnect() end
+		if sitJumpHook then sitJumpHook:Disconnect() end
+		sittingOnTarget = true
+		notifyIY("Sitting on head of " .. targetPlayer.DisplayName, false)
+		sitJumpHook = UserInputService.JumpRequest:Connect(function()
+			sittingOnTarget = false; if sitHeartbeat then sitHeartbeat:Disconnect() end; if sitJumpHook then sitJumpHook:Disconnect() end
+			local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+			if hum then hum.Sit = false hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+		end)
+		sitHeartbeat = RunService.Heartbeat:Connect(function()
+			local localHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+			local targetHRP = targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+			local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+			if sittingOnTarget and localHRP and targetHRP and hum then
+				hum.Sit = true localHRP.CFrame = targetHRP.CFrame * CFrame.new(0, 1.5, 0) localHRP.AssemblyLinearVelocity = Vector3.new(0,0,0)
+			else sittingOnTarget = false; if sitHeartbeat then sitHeartbeat:Disconnect() end; if sitJumpHook then sitJumpHook:Disconnect() end end
+		end)
+		return true
+	end
+
+	if baseCmd == "tpto" then
+		if not targetArg then notifyIY("Usage: tpto [player / random]", true) return true end
+		local targetPlayer = nil
+		if targetArg == "random" then
+			local pool = {}
+			for _, p in ipairs(Players:GetPlayers()) do if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then table.insert(pool, p) end end
+			if #pool > 0 then targetPlayer = pool[math.random(1, #pool)] else notifyIY("No players found.", true) return true end
+		else
+			targetPlayer = findPlayerByPartialName(string.sub(message, string.len(args[1]) + 2))
+			if not targetPlayer then notifyIY("Player not found.", true) return true end
+		end
+		local tHrp = targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+		local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if tHrp and myHrp then myHrp.CFrame = tHrp.CFrame * CFrame.new(0, 0, 3) notifyIY("Teleported to " .. targetPlayer.DisplayName, false) end
+		return true
+	end
+
+	if lowerMessage == "enable infjump" then
+		if not infiniteJumpEnabled then
+			infiniteJumpEnabled = true
+			jumpConnection = UserInputService.JumpRequest:Connect(function()
+				local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+				if infiniteJumpEnabled and hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+			end)
+			notifyIY("Infinite jump enabled.", false)
+		end
+		return true
+	end
+
+	if lowerMessage == "disable infjump" then if infiniteJumpEnabled then infiniteJumpEnabled = false; if jumpConnection then jumpConnection:Disconnect() end notifyIY("Infinite jump disabled.", false) end return true end
+	if lowerMessage == "enable antigrab" then enableAntiGrabMechanic() notifyIY("Anti-grab activated.", false) return true end
+	if lowerMessage == "disable antigrab" then disableAntiGrabMechanic() notifyIY("Anti-grab deactivated.", false) return true end
+	if baseCmd == "cmds" or baseCmd == "commands" then displayLocalSystemMessage("Commands: fov, afk, back, fly, unfly, noclip, clip, backpack [user/random], chatcopy [user/all], stopcopying", "#FFD700") return true end
 	return false
 end
 
 -- ==========================================
--- FIXED PC CHAT SENSOR COMPATIBILITY HOOK
+-- CHAT SENSOR COMPATIBILITY HOOK
 -- ==========================================
 local function hookPlayerChat(player)
 	if player == LocalPlayer then return end
-	
-	-- Legacy / Generic Compatibility Engine
 	trackConnection(player.Chatted:Connect(function(message)
 		if isCopying and targetsToCopy[player.Name] then
 			localChatLog(player.DisplayName, message)
@@ -268,13 +635,11 @@ local function hookPlayerChat(player)
 	end))
 end
 
--- TextChatService Direct Pipeline Hook (Ensures accurate processing in 2026 systems)
 if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
 	trackConnection(TextChatService.MessageReceived:Connect(function(textChatMessage)
 		local textSource = textChatMessage.TextSource
 		if not textSource then return end
 		local sender = Players:GetPlayerByUserId(textSource.UserId)
-		
 		if sender and sender ~= LocalPlayer then
 			if isCopying and targetsToCopy[sender.Name] then
 				localChatLog(sender.DisplayName, textChatMessage.Text)
@@ -284,13 +649,41 @@ if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
 	end))
 end
 
--- Initialize listeners across active entities
 for _, p in ipairs(Players:GetPlayers()) do hookPlayerChat(p) end
-trackConnection(Players.PlayerAdded:Connect(function(p)
-	hookPlayerChat(p)
-	if copyAllActive then targetsToCopy[p.Name] = true end
-end))
+trackConnection(Players.PlayerAdded:Connect(function(p) hookPlayerChat(p) if copyAllActive then targetsToCopy[p.Name] = true end end))
 trackConnection(Players.PlayerRemoving:Connect(function(p) targetsToCopy[p.Name] = nil end))
+
+-- ==========================================
+-- INACTIVITY AUTOMATION LOOP
+-- ==========================================
+local function registerActivity()
+	lastInputTime = os.clock()
+	if isAutoAfk then
+		isAutoAfk = false
+		if autoAfkLoopThread then task.cancel(autoAfkLoopThread) autoAfkLoopThread = nil end
+		if isFlingThingsAndPeople then disableAntiGrabMechanic() end
+		notifyIY("Auto-AFK cleared.", false)
+	end
+end
+
+trackConnection(UserInputService.InputBegan:Connect(function(input, processed) if processed and UserInputService:GetFocusedTextBox() then return end registerActivity() end))
+trackConnection(UserInputService.TouchPan:Connect(registerActivity))
+trackConnection(UserInputService.TouchTap:Connect(registerActivity))
+trackConnection(UserInputService.PointerAction:Connect(registerActivity))
+
+trackConnection(RunService.Heartbeat:Connect(function()
+	if not isManualAfk and not isAutoAfk then
+		if os.clock() - lastInputTime >= INACTIVITY_THRESHOLD then
+			isAutoAfk = true
+			notifyIY("Inactive. Automated AFK loop engaged.", false)
+			if isFlingThingsAndPeople then enableAntiGrabMechanic() end
+			if autoAfkLoopThread then task.cancel(autoAfkLoopThread) end
+			autoAfkLoopThread = task.spawn(function()
+				while isAutoAfk do task.wait(30) if isAutoAfk then sendPublicChatMessage("Im afk, ill be back (automated message from script)") end end
+			end)
+		end
+	end
+end))
 
 -- ==========================================
 -- INTERACTIVE GUI ANIMATIONS & INPUT
@@ -325,6 +718,19 @@ end
 pcall(function() ContextActionService:UnbindAction("ToggleCommandBarAction") end)
 ContextActionService:BindAction("ToggleCommandBarAction", handleBindAction, false, Enum.KeyCode.M)
 
+if IsMobile then
+	local MobileBtn = Instance.new("TextButton")
+	MobileBtn.Size = UDim2.new(0, 50, 0, 30); MobileBtn.Position = UDim2.new(0.05, 0, 0.35, 0); MobileBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 35); MobileBtn.BackgroundTransparency = 0.2
+	MobileBtn.Text = "CMD"; MobileBtn.TextColor3 = Color3.fromRGB(240, 240, 240); MobileBtn.Font = Enum.Font.SourceSansBold; MobileBtn.TextSize = 14; MobileBtn.Parent = ScreenGui
+	local BtnCorner = Instance.new("UICorner"); BtnCorner.CornerRadius = UDim.new(0, 4); BtnCorner.Parent = MobileBtn
+	local BtnStroke = Instance.new("UIStroke"); BtnStroke.Thickness = 1; BtnStroke.Color = Color3.fromRGB(80, 80, 80); BtnStroke.Parent = MobileBtn
+	MobileBtn.MouseButton1Click:Connect(function() toggleCmdBar(not barOpen) end)
+	local dragToggle, dragStart, startPos = nil, nil, nil
+	MobileBtn.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.Touch then dragToggle = true dragStart = input.Position startPos = MobileBtn.Position end end)
+	MobileBtn.InputChanged:Connect(function(input) if dragToggle and input.UserInputType == Enum.UserInputType.Touch then local delta = input.Position - dragStart MobileBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y) end end)
+	MobileBtn.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.Touch then dragToggle = false end end)
+end
+
 TextBox.Changed:Connect(function(prop)
 	if prop == "Text" then
 		local text = TextBox.Text
@@ -337,4 +743,4 @@ end)
 
 TextBox.FocusLost:Connect(function(enterPressed) if enterPressed and TextBox.Text ~= "" then runCommand(TextBox.Text) end toggleCmdBar(false) end)
 
-notifyIY("Engine initialization complete. Use 'chatcopy [username]' or 'chatcopy all'.", false)
+notifyIY("Engine initialization complete.", false)
