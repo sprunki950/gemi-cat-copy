@@ -2,6 +2,7 @@
 local Players = game:GetService("Players")
 local TextChatService = game:GetService("TextChatService")
 local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
 local TweenService = game:GetService("TweenService")
 local StarterGui = game:GetService("StarterGui")
 local Workspace = game:GetService("Workspace")
@@ -146,6 +147,7 @@ CleanupTrigger.Event:Connect(function()
 	isManualAfk = false
 	isAutoAfk = false
 	disableAimbotEngine()
+	pcall(function() ContextActionService:UnbindAction("ToggleCommandBarAction") end)
 	if manualAfkLoopThread then task.cancel(manualAfkLoopThread) end
 	if autoAfkLoopThread then task.cancel(autoAfkLoopThread) end
 	if autoStruggleCoroutine then autoStruggleCoroutine:Disconnect() end
@@ -489,7 +491,6 @@ local function runCommand(message)
 		aimbotEnabled = true
 		aimbotTargetPlayer = targetPlayer
 		
-		-- CLICK-AND-HOLD CONFIGURATION
 		if IsPC then
 			sendPublicChatMessage("Aimbot dynamic tracker active. Target: " .. targetPlayer.DisplayName .. " [Hold Right Click]")
 			
@@ -506,7 +507,6 @@ local function runCommand(message)
 				end
 			end)
 		else
-			-- Fallback to Screen Toggle Button if Mobile
 			sendPublicChatMessage("Aimbot tracking active. Target: " .. targetPlayer.DisplayName .. " [Mobile Toggle Enabled]")
 			
 			aimbotButtonFrame = Instance.new("Frame")
@@ -559,7 +559,6 @@ local function runCommand(message)
 			local activeNearest = getClosestPlayer()
 			if activeNearest then aimbotTargetPlayer = activeNearest end
 			
-			-- DYNAMIC SCREEN OBJECT/COLOR RECOGNITION SENSOR
 			if aimbotLockActive then
 				local grabGui = PlayerGui:FindFirstChild("GrabGui") or PlayerGui:FindFirstChild("MobileGrabGui") or PlayerGui:FindFirstChild("MainGui")
 				if grabGui then
@@ -658,7 +657,7 @@ local function runCommand(message)
 		isSpinning = true
 		sendPublicChatMessage("Enabled spin")
 		local currentAngle = 0
-		spinHeartbeat = RunService.Heartbeat Connect(function(deltaTime)
+		spinHeartbeat = RunService.Heartbeat:Connect(function(deltaTime)
 			local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 			if hrp and isSpinning then currentAngle = currentAngle + (360 * deltaTime) hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, math.rad(currentAngle), 0) end
 		end)
@@ -820,19 +819,28 @@ local function toggleCmdBar(open)
 	
 	if open then
 		TextBox:CaptureFocus()
-		task.defer(function() if TextBox.Text == "m" or TextBox.Text == "M" then TextBox.Text = "" end end)
+		-- Fail-safe clear to strip immediate 'm' characters on loop initialization
+		task.spawn(function()
+			RunService.RenderStepped:Wait()
+			if TextBox.Text == "m" or TextBox.Text == "M" then TextBox.Text = "" end
+		end)
 	else
 		TextBox:ReleaseFocus() TextBox.Text = "" PredictionLabel.Text = ""
 	end
 end
 
--- UPDATED KEYBIND: CHANGED FROM COLON TO 'M' KEY
-trackConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed) 
-	if gameProcessed or UserInputService:GetFocusedTextBox() then return end
-	if input.KeyCode == Enum.KeyCode.M then 
-		toggleCmdBar(not barOpen) 
-	end 
-end))
+-- OVERRIDE M-KEY INPUT CONTEXT ACTION FOR EXPLICIT GAME BINDING
+local function handleBindAction(actionName, inputState, inputObject)
+	if inputState == Enum.UserInputState.Begin then
+		if UserInputService:GetFocusedTextBox() then return Enum.ContextActionResult.Pass end
+		toggleCmdBar(not barOpen)
+		return Enum.ContextActionResult.Sink
+	end
+	return Enum.ContextActionResult.Pass
+end
+
+pcall(function() ContextActionService:UnbindAction("ToggleCommandBarAction") end)
+ContextActionService:BindAction("ToggleCommandBarAction", handleBindAction, false, Enum.KeyCode.M)
 
 if IsMobile then
 	local MobileBtn = Instance.new("TextButton")
