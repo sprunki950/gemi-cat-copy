@@ -658,7 +658,7 @@ local function runCommand(message)
 		isSpinning = true
 		sendPublicChatMessage("Enabled spin")
 		local currentAngle = 0
-		spinHeartbeat = RunService.Heartbeat:Connect(function(deltaTime)
+		spinHeartbeat = RunService.Heartbeat Connect(function(deltaTime)
 			local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 			if hrp and isSpinning then currentAngle = currentAngle + (360 * deltaTime) hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, math.rad(currentAngle), 0) end
 		end)
@@ -820,13 +820,19 @@ local function toggleCmdBar(open)
 	
 	if open then
 		TextBox:CaptureFocus()
-		task.defer(function() if TextBox.Text == ":" then TextBox.Text = "" end end)
+		task.defer(function() if TextBox.Text == "m" or TextBox.Text == "M" then TextBox.Text = "" end end)
 	else
 		TextBox:ReleaseFocus() TextBox.Text = "" PredictionLabel.Text = ""
 	end
 end
 
-trackConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed) if input.KeyCode == Enum.KeyCode.Colon then toggleCmdBar(not barOpen) end end))
+-- UPDATED KEYBIND: CHANGED FROM COLON TO 'M' KEY
+trackConnection(UserInputService.InputBegan:Connect(function(input, gameProcessed) 
+	if gameProcessed or UserInputService:GetFocusedTextBox() then return end
+	if input.KeyCode == Enum.KeyCode.M then 
+		toggleCmdBar(not barOpen) 
+	end 
+end))
 
 if IsMobile then
 	local MobileBtn = Instance.new("TextButton")
